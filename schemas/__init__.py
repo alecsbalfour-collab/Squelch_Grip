@@ -1,3 +1,4 @@
+from schemas.lexicon_models import LexiconPack, LexiconTerm
 from schemas.session_models import (
     AudioCommandType,
     BargeInDirective,
@@ -15,6 +16,8 @@ __all__ = [
     "BargeInDirective",
     "ContextNode",
     "InterruptionType",
+    "LexiconPack",
+    "LexiconTerm",
     "NodeStatus",
     "RoomState",
     "Utterance",
