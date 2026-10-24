@@ -110,6 +110,10 @@ def test_classifier_background_event_squelch() -> None:
     assert classifier.classify("[door slam]") == InterruptionType.BACKGROUND_EVENT
     assert classifier.classify("[cough]") == InterruptionType.BACKGROUND_EVENT
     assert classifier.classify("   ") == InterruptionType.BACKGROUND_EVENT
+    assert (
+        classifier.classify("[mic click] wait, stop deployment [noise]")
+        == InterruptionType.HARD_INTERRUPT
+    )
 
 
 def test_classifier_multiword_questions_are_hard_interrupts() -> None:

@@ -11,16 +11,35 @@ This file defines the architectural rules, coding conventions, and verification 
 - **Directory Structure**:
   ```text
   D:\SquelchGrip\squelch_grip_backend/
+  ├── api/
+  │   ├── __init__.py
+  │   └── server.py               # FastAPI REST & full-duplex WebSocket server
   ├── schemas/
   │   ├── __init__.py
-  │   └── session_models.py       # Pydantic v2 domain & directive models
+  │   ├── session_models.py       # Pydantic v2 domain & directive models
+  │   ├── lexicon_models.py       # Domain lexicon pack & term models
+  │   ├── turn_models.py          # AudioTurnEvent & TurnProcessingResult
+  │   ├── prompt_models.py        # CompiledContextPacket for LLM context
+  │   └── navigation_models.py    # NavigationAction & NavigationDecision
   ├── core/
   │   ├── __init__.py
   │   ├── context_graph.py        # ContextGraphOrchestrator (non-linear topic tree & barge-in)
-  │   └── state_manager.py        # SessionStateManager (room & VoiceProfile registry)
+  │   ├── state_manager.py        # SessionStateManager (room & VoiceProfile registry)
+  │   ├── voice_biometrics.py     # VoiceBiometricMatcher & cosine_similarity
+  │   ├── interruption_classifier.py # Heuristic barge-in / backchannel / noise classifier
+  │   ├── lexicon_manager.py      # LexiconManager (domain pack registry & normalization)
+  │   ├── navigation_detector.py  # Spoken conversational navigation intent detector
+  │   ├── turn_pipeline.py        # End-to-end async TurnPipeline
+  │   └── prompt_compiler.py      # ContextPromptCompiler (Markdown & structured packet)
   ├── tests/
   │   ├── __init__.py
-  │   └── test_context_graph.py   # Async pytest suite
+  │   ├── test_context_graph.py
+  │   ├── test_biometrics_and_classifier.py
+  │   ├── test_lexicon_manager.py
+  │   ├── test_turn_pipeline.py
+  │   ├── test_prompt_compiler.py
+  │   ├── test_navigation_detector.py
+  │   └── test_api_server.py
   ├── pyproject.toml              # Pytest & package configuration
   ├── requirements.txt
   ├── README.md

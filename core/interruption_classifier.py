@@ -53,12 +53,7 @@ class InterruptionClassifier:
     ) -> InterruptionType:
         raw = utterance.strip()
 
-        if (
-            vad_confidence < 0.45
-            or rms_db < -42.0
-            or not raw
-            or (raw.startswith("[") and raw.endswith("]"))
-        ):
+        if vad_confidence < 0.45 or rms_db < -42.0 or not raw:
             return InterruptionType.BACKGROUND_EVENT
 
         normalized = self._normalize(raw)

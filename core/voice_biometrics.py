@@ -22,7 +22,8 @@ def cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
     if magnitude_a == 0.0 or magnitude_b == 0.0:
         return 0.0
 
-    return dot_product / (magnitude_a * magnitude_b)
+    score = dot_product / (magnitude_a * magnitude_b)
+    return max(-1.0, min(1.0, score))
 
 
 class VoiceBiometricMatcher:

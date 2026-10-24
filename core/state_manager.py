@@ -45,6 +45,9 @@ class SessionStateManager:
     def get_voice_profile(self, user_id: str) -> Optional[VoiceProfile]:
         return self._voice_profiles.get(user_id)
 
+    def list_voice_profiles(self) -> list[VoiceProfile]:
+        return list(self._voice_profiles.values())
+
     async def purge_non_permanent_profiles(self) -> int:
         async with self._lock:
             to_remove = [
