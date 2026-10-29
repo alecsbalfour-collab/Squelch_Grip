@@ -44,6 +44,14 @@ def create_app() -> FastAPI:
             )
         return orchestrator
 
+    @app.get("/health")
+    async def health() -> dict:
+        return {
+            "status": "ok",
+            "service": "squelch_grip_backend",
+            "version": "1.0.0a1",
+        }
+
     @app.post("/rooms", response_model=RoomState)
     async def create_room(payload: _CreateRoomRequest) -> RoomState:
         orchestrator = await state_manager.create_room(

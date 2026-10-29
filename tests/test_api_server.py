@@ -7,6 +7,17 @@ from fastapi.testclient import TestClient
 from api.server import create_app
 
 
+def test_health_endpoint() -> None:
+    client = TestClient(create_app())
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ok",
+        "service": "squelch_grip_backend",
+        "version": "1.0.0a1",
+    }
+
+
 def test_rest_room_profile_lexicon_prompt_flow() -> None:
     client = TestClient(create_app())
 
