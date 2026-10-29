@@ -91,6 +91,8 @@ class ContextGraphOrchestrator:
             target = self.nodes.get(node_id)
             if target is None:
                 raise KeyError(f"ContextNode '{node_id}' does not exist in room '{self.state.room_id}'.")
+            if target.status == NodeStatus.PARKED:
+                target.status = NodeStatus.OPEN
             self.state.current_node_id = node_id
             return target
 
@@ -160,6 +162,46 @@ class ContextGraphOrchestrator:
 
             self.state.current_node_id = self.state.root_node_id
             return self.root_node
+
+    async def prune_resolved_branches(self) -> list[str]:
+        """Archives and removes RESOLVED leaf tangents outside the active lineage."""
+        async with self._lock:
+            protected = {n.node_id for n in self.get_active_lineage()} | {
+                self.state.root_node_id
+            }
+            pruned_ids: list[str] = []
+
+            while True:
+                prunable = [
+                    node
+                    for node in self.nodes.values()
+                    if node.node_id not in protected
+                    and node.status == NodeStatus.RESOLVED
+                    and len(node.child_nodes) == 0
+                ]
+                if not prunable:
+                    break
+
+                for node in prunable:
+                    parent = (
+                        self.nodes.get(node.parent_id)
+                        if node.parent_id is not None
+                        else None
+                    )
+                    if parent is not None:
+                        if node.node_id in parent.child_nodes:
+                            parent.child_nodes.remove(node.node_id)
+                        parent.metadata.setdefault("archived_tangents", []).append(
+                            {
+                                "node_id": node.node_id,
+                                "topic_summary": node.topic_summary,
+                                "utterance_count": len(node.utterances),
+                            }
+                        )
+                    del self.nodes[node.node_id]
+                    pruned_ids.append(node.node_id)
+
+            return pruned_ids
 
     async def handle_barge_in(
         self,

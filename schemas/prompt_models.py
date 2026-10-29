@@ -14,3 +14,16 @@ class CompiledContextPacket(BaseModel):
     unresolved_tangent_topics: list[str] = Field(default_factory=list)
     domain_glossary: dict[str, str] = Field(default_factory=dict)
     system_prompt_markdown: str = Field(..., min_length=1)
+
+
+class ContextDeltaPacket(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    room_id: str = Field(..., min_length=1)
+    active_node_id: str = Field(..., min_length=1)
+    active_topic: str = Field(..., min_length=1)
+    topic_switched: bool
+    lineage_breadcrumbs: list[str] = Field(default_factory=list)
+    delta_utterances: list[str] = Field(default_factory=list)
+    unresolved_tangent_topics: list[str] = Field(default_factory=list)
+    delta_markdown: str = Field(..., min_length=1)

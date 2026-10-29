@@ -148,3 +148,54 @@ def test_websocket_unknown_room_closes() -> None:
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect("/ws/rooms/room-missing"):
             pass
+
+
+def test_crosstalk_batch_endpoint_and_ws_broadcast() -> None:
+    client = TestClient(create_app())
+    client.post(
+        "/rooms", json={"room_id": "room-xtalk-01", "initial_topic": "Design"}
+    )
+
+    with (
+        client.websocket_connect("/ws/rooms/room-xtalk-01") as ws_audio,
+        client.websocket_connect("/ws/rooms/room-xtalk-01") as ws_ui,
+    ):
+        ws_audio.send_json(
+            {"raw_utterance": "starting discussion", "speaker_id_hint": "usr-1"}
+        )
+        msg_audio = ws_audio.receive_json()
+        msg_ui = ws_ui.receive_json()
+        assert msg_audio["resolved_speaker_id"] == "usr-1"
+        assert msg_ui["resolved_speaker_id"] == "usr-1"
+
+        xtalk = client.post(
+            "/rooms/room-xtalk-01/crosstalk",
+            json={
+                "room_id": "room-xtalk-01",
+                "frames": [
+                    {
+                        "speaker_id": "usr-guest",
+                        "tier": "CONVERSATIONAL",
+                        "utterance": "let me jump in",
+                        "rms_db": -10.0,
+                    },
+                    {
+                        "speaker_id": "usr-host",
+                        "tier": "PERMANENT",
+                        "utterance": "quick tangent on Auth Tokens",
+                        "rms_db": -25.0,
+                    },
+                ],
+            },
+        )
+        assert xtalk.status_code == 200
+        body = xtalk.json()
+        assert body["arbitration"]["winning_speaker_id"] == "usr-host"
+        assert body["turn_result"]["resolved_speaker_id"] == "usr-host"
+        assert body["turn_result"]["branched_tangent"] is True
+
+        broadcast_audio = ws_audio.receive_json()
+        broadcast_ui = ws_ui.receive_json()
+        assert broadcast_audio["resolved_speaker_id"] == "usr-host"
+        assert broadcast_ui["branched_tangent"] is True
+

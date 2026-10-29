@@ -231,3 +231,80 @@ async def test_lineage_resolver_jump_and_node_lifecycle() -> None:
     remaining_unresolved_ids = {n.node_id for n in orchestrator.get_unresolved_tangents()}
     assert remaining_unresolved_ids == {branch_a.node_id, branch_a1.node_id}
 
+
+
+@pytest.mark.asyncio
+async def test_prune_resolved_branches_archives_leaf_tangents() -> None:
+    orchestrator = ContextGraphOrchestrator(
+        room_id="room-prune-01",
+        initial_topic="Root Topic",
+    )
+    tangent = await orchestrator.branch_tangent("Caching Strategy", "speaker-a")
+    await orchestrator.record_utterance("speaker-a", "redis vs memcached")
+    await orchestrator.record_utterance("speaker-a", "redis wins")
+
+    await orchestrator.pop_to_anchor(mark_resolved=True)
+    assert orchestrator.state.current_node_id == orchestrator.state.root_node_id
+
+    pruned = await orchestrator.prune_resolved_branches()
+
+    assert pruned == [tangent.node_id]
+    assert tangent.node_id not in orchestrator.nodes
+    assert orchestrator.root_node.child_nodes == []
+    archived = orchestrator.root_node.metadata["archived_tangents"]
+    assert archived == [
+        {
+            "node_id": tangent.node_id,
+            "topic_summary": "Caching Strategy",
+            "utterance_count": 2,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_prune_resolved_branches_prunes_chains_and_preserves_active() -> None:
+    orchestrator = ContextGraphOrchestrator(
+        room_id="room-prune-02",
+        initial_topic="Root Topic",
+    )
+    tangent_a = await orchestrator.branch_tangent("Tangent A", "speaker-a")
+    tangent_b = await orchestrator.branch_tangent("Tangent B", "speaker-a")
+    await orchestrator.jump_to_node(orchestrator.state.root_node_id)
+    open_tangent = await orchestrator.branch_tangent("Still Open", "speaker-b")
+
+    # Resolve the A->B chain bottom-up while popping back to root.
+    await orchestrator.set_node_status(NodeStatus.RESOLVED, tangent_b.node_id)
+    await orchestrator.set_node_status(NodeStatus.RESOLVED, tangent_a.node_id)
+    await orchestrator.jump_to_node(orchestrator.state.root_node_id)
+
+    pruned = await orchestrator.prune_resolved_branches()
+
+    assert set(pruned) == {tangent_a.node_id, tangent_b.node_id}
+    assert tangent_a.node_id not in orchestrator.nodes
+    assert tangent_b.node_id not in orchestrator.nodes
+    assert open_tangent.node_id in orchestrator.nodes
+    archived_topics = [
+        entry["topic_summary"]
+        for entry in orchestrator.root_node.metadata["archived_tangents"]
+    ]
+    assert "Tangent A" in archived_topics
+
+
+@pytest.mark.asyncio
+async def test_prune_resolved_branches_respects_active_lineage_and_empty() -> None:
+    orchestrator = ContextGraphOrchestrator(
+        room_id="room-prune-03",
+        initial_topic="Root Topic",
+    )
+    tangent = await orchestrator.branch_tangent("Active Tangent", "speaker-a")
+
+    # RESOLVED but still the current node -> protected by active lineage.
+    await orchestrator.set_node_status(NodeStatus.RESOLVED, tangent.node_id)
+    pruned = await orchestrator.prune_resolved_branches()
+    assert pruned == []
+    assert tangent.node_id in orchestrator.nodes
+
+    await orchestrator.pop_to_anchor()
+    pruned_again = await orchestrator.prune_resolved_branches()
+    assert pruned_again == [tangent.node_id]
+    assert await orchestrator.prune_resolved_branches() == []

@@ -118,3 +118,60 @@ async def test_system_prompt_markdown_renders_all_sections() -> None:
     assert "- (none)" in markdown
     assert "## Domain Glossary" in markdown
     assert tangent.node_id == packet.active_node_id
+
+
+@pytest.mark.asyncio
+async def test_compile_delta_topic_switch_and_breadcrumbs() -> None:
+    orchestrator = ContextGraphOrchestrator(
+        room_id="room-delta-01", initial_topic="Root Topic"
+    )
+    tangent = await orchestrator.branch_tangent("Side Topic", "usr-a")
+    root_id = orchestrator.state.root_node_id
+
+    compiler = ContextPromptCompiler()
+
+    switched = compiler.compile_delta(orchestrator, previous_node_id=root_id)
+    assert switched.topic_switched is True
+    assert switched.active_node_id == tangent.node_id
+    assert switched.lineage_breadcrumbs == ["Root Topic", "Side Topic"]
+
+    same = compiler.compile_delta(
+        orchestrator, previous_node_id=tangent.node_id
+    )
+    assert same.topic_switched is False
+    assert same.lineage_breadcrumbs == []
+
+    initial = compiler.compile_delta(orchestrator, previous_node_id=None)
+    assert initial.topic_switched is False
+    assert initial.lineage_breadcrumbs == ["Root Topic", "Side Topic"]
+
+
+@pytest.mark.asyncio
+async def test_compile_delta_utterance_window_and_tangents() -> None:
+    orchestrator = ContextGraphOrchestrator(
+        room_id="room-delta-02", initial_topic="Root Topic"
+    )
+    tangent = await orchestrator.branch_tangent("Active Side", "usr-a")
+    await orchestrator.jump_to_node(orchestrator.state.root_node_id)
+    sibling = await orchestrator.branch_tangent("Sibling Park", "usr-b")
+    await orchestrator.set_node_status(NodeStatus.PARKED, sibling.node_id)
+    await orchestrator.jump_to_node(tangent.node_id)
+
+    await orchestrator.record_utterance("usr-a", "old message")
+    await orchestrator.record_utterance("usr-a", "new message")
+    orchestrator.current_node.utterances[0].timestamp = 100.0
+    orchestrator.current_node.utterances[1].timestamp = 200.0
+
+    packet = ContextPromptCompiler().compile_delta(
+        orchestrator,
+        previous_node_id=tangent.node_id,
+        since_timestamp=150.0,
+    )
+
+    assert packet.delta_utterances == ["usr-a: new message"]
+    assert packet.unresolved_tangent_topics == [
+        f"[PARKED] Sibling Park (node={sibling.node_id})"
+    ]
+    assert "# Context Delta" in packet.delta_markdown
+    assert "Topic unchanged" in packet.delta_markdown
+    assert "- usr-a: new message" in packet.delta_markdown

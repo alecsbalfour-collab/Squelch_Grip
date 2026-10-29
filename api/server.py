@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -8,8 +10,10 @@ from core.prompt_compiler import ContextPromptCompiler
 from core.session_store import SessionSnapshotStore
 from core.state_manager import SessionStateManager
 from core.turn_pipeline import TurnPipeline
+from schemas.arbitration_models import CrosstalkBatchEvent, CrosstalkBatchResult
+from schemas.diagnostics_models import RoomDiagnosticsReport
 from schemas.lexicon_models import LexiconPack
-from schemas.prompt_models import CompiledContextPacket
+from schemas.prompt_models import CompiledContextPacket, ContextDeltaPacket
 from schemas.session_models import RoomState, VoiceProfile
 from schemas.snapshot_models import RoomSnapshot
 from schemas.turn_models import AudioTurnEvent, TurnProcessingResult
@@ -38,6 +42,15 @@ def create_app() -> FastAPI:
     )
     prompt_compiler = ContextPromptCompiler()
     snapshot_store = SessionSnapshotStore()
+    ws_connections: dict[str, list[WebSocket]] = {}
+
+    async def _broadcast_turn(room_id: str, result: TurnProcessingResult) -> None:
+        payload = result.model_dump(mode="json")
+        for peer in list(ws_connections.get(room_id, [])):
+            try:
+                await peer.send_json(payload)
+            except Exception:
+                pass
 
     def _require_room(room_id: str):
         orchestrator = state_manager.get_room(room_id)
@@ -80,6 +93,31 @@ def create_app() -> FastAPI:
             _require_room(room_id), lexicon_manager
         )
 
+    @app.get("/rooms/{room_id}/prompt/delta", response_model=ContextDeltaPacket)
+    async def get_prompt_delta(
+        room_id: str,
+        previous_node_id: Optional[str] = None,
+        since_timestamp: float = 0.0,
+    ) -> ContextDeltaPacket:
+        return prompt_compiler.compile_delta(
+            _require_room(room_id),
+            previous_node_id=previous_node_id,
+            since_timestamp=since_timestamp,
+        )
+
+    @app.post("/rooms/{room_id}/prune")
+    async def prune_room(room_id: str) -> dict:
+        orchestrator = _require_room(room_id)
+        pruned = await orchestrator.prune_resolved_branches()
+        return {"room_id": room_id, "pruned_node_ids": pruned}
+
+    @app.get("/rooms/{room_id}/diagnostics", response_model=RoomDiagnosticsReport)
+    async def get_diagnostics(room_id: str) -> RoomDiagnosticsReport:
+        try:
+            return turn_pipeline.get_room_diagnostics(room_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc.args[0]))
+
     @app.post("/profiles", response_model=VoiceProfile)
     async def register_profile(profile: VoiceProfile) -> VoiceProfile:
         return await state_manager.register_voice_profile(profile)
@@ -104,9 +142,24 @@ def create_app() -> FastAPI:
     ) -> TurnProcessingResult:
         event = event.model_copy(update={"room_id": room_id})
         try:
-            return await turn_pipeline.process_turn(event)
+            result = await turn_pipeline.process_turn(event)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc.args[0]))
+        await _broadcast_turn(room_id, result)
+        return result
+
+    @app.post("/rooms/{room_id}/crosstalk", response_model=CrosstalkBatchResult)
+    async def process_crosstalk(
+        room_id: str, batch: CrosstalkBatchEvent
+    ) -> CrosstalkBatchResult:
+        batch = batch.model_copy(update={"room_id": room_id})
+        try:
+            result = await turn_pipeline.process_crosstalk_batch(batch)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc.args[0]))
+        if result.turn_result is not None:
+            await _broadcast_turn(room_id, result.turn_result)
+        return result
 
     @app.get("/rooms/{room_id}/snapshot", response_model=RoomSnapshot)
     async def get_snapshot(room_id: str) -> RoomSnapshot:
@@ -128,6 +181,7 @@ def create_app() -> FastAPI:
             await websocket.close(code=1008)
             return
         await websocket.accept()
+        ws_connections.setdefault(room_id, []).append(websocket)
         try:
             while True:
                 data = await websocket.receive_json()
@@ -143,9 +197,13 @@ def create_app() -> FastAPI:
                     await websocket.send_json({"detail": exc.errors()})
                     continue
                 result = await turn_pipeline.process_turn(event)
-                await websocket.send_json(result.model_dump(mode="json"))
+                await _broadcast_turn(room_id, result)
         except WebSocketDisconnect:
-            return
+            pass
+        finally:
+            peers = ws_connections.get(room_id, [])
+            if websocket in peers:
+                peers.remove(websocket)
 
     return app
 

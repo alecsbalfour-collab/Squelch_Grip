@@ -4,7 +4,7 @@ from typing import Optional
 
 from core.context_graph import ContextGraphOrchestrator
 from core.lexicon_manager import LexiconManager
-from schemas.prompt_models import CompiledContextPacket
+from schemas.prompt_models import CompiledContextPacket, ContextDeltaPacket
 
 
 class ContextPromptCompiler:
@@ -62,6 +62,88 @@ class ContextPromptCompiler:
                 domain_glossary,
             ),
         )
+
+    def compile_delta(
+        self,
+        orchestrator: ContextGraphOrchestrator,
+        previous_node_id: Optional[str] = None,
+        since_timestamp: float = 0.0,
+    ) -> ContextDeltaPacket:
+        """Compiles a compact delta packet of changes since a previous node/timestamp."""
+        current = orchestrator.current_node
+        topic_switched = (
+            previous_node_id is not None
+            and previous_node_id != current.node_id
+        )
+        lineage_breadcrumbs = (
+            [n.topic_summary for n in orchestrator.get_active_lineage()]
+            if topic_switched or previous_node_id is None
+            else []
+        )
+        delta_utterances = [
+            f"{u.speaker_id}: {u.text}"
+            for u in current.utterances
+            if u.timestamp > since_timestamp
+        ]
+        unresolved_tangent_topics = [
+            f"[{n.status.value}] {n.topic_summary} (node={n.node_id})"
+            for n in orchestrator.get_unresolved_tangents()
+            if n.node_id != current.node_id
+        ]
+
+        return ContextDeltaPacket(
+            room_id=orchestrator.state.room_id,
+            active_node_id=current.node_id,
+            active_topic=current.topic_summary,
+            topic_switched=topic_switched,
+            lineage_breadcrumbs=lineage_breadcrumbs,
+            delta_utterances=delta_utterances,
+            unresolved_tangent_topics=unresolved_tangent_topics,
+            delta_markdown=self._render_delta_markdown(
+                current.topic_summary,
+                topic_switched,
+                previous_node_id,
+                lineage_breadcrumbs,
+                delta_utterances,
+                unresolved_tangent_topics,
+            ),
+        )
+
+    @staticmethod
+    def _render_delta_markdown(
+        active_topic: str,
+        topic_switched: bool,
+        previous_node_id: Optional[str],
+        lineage_breadcrumbs: list[str],
+        delta_utterances: list[str],
+        unresolved_tangent_topics: list[str],
+    ) -> str:
+        lines = ["# Context Delta", ""]
+        if previous_node_id is None:
+            lines.append(f"Initial context packet for **{active_topic}**.")
+        elif topic_switched:
+            lines.append(f"Topic switched -> **{active_topic}**.")
+        else:
+            lines.append(f"Topic unchanged: **{active_topic}**.")
+        lines += ["", "## Lineage Breadcrumbs", ""]
+        lines += (
+            [f"{i}. {t}" for i, t in enumerate(lineage_breadcrumbs, start=1)]
+            if lineage_breadcrumbs
+            else ["- (unchanged)"]
+        )
+        lines += ["", "## New Utterances", ""]
+        lines += (
+            [f"- {u}" for u in delta_utterances]
+            if delta_utterances
+            else ["- (none)"]
+        )
+        lines += ["", "## Unresolved / Parked Tangents", ""]
+        lines += (
+            [f"- {t}" for t in unresolved_tangent_topics]
+            if unresolved_tangent_topics
+            else ["- (none)"]
+        )
+        return "\n".join(lines)
 
     @staticmethod
     def _render_markdown(
