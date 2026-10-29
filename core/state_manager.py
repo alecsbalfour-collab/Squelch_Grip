@@ -26,6 +26,13 @@ class SessionStateManager:
             self._rooms[room_id] = orchestrator
             return orchestrator
 
+    async def set_room(
+        self, room_id: str, orchestrator: ContextGraphOrchestrator
+    ) -> ContextGraphOrchestrator:
+        async with self._lock:
+            self._rooms[room_id] = orchestrator
+            return orchestrator
+
     def get_room(self, room_id: str) -> Optional[ContextGraphOrchestrator]:
         return self._rooms.get(room_id)
 

@@ -7,7 +7,9 @@ from core.interruption_classifier import (
 from core.lexicon_manager import LexiconManager
 from core.navigation_detector import NavigationIntentDetector
 from core.prompt_compiler import ContextPromptCompiler
+from core.session_store import SessionSnapshotStore
 from core.state_manager import SessionStateManager
+from core.turn_arbitrator import TurnArbitrator
 from core.turn_pipeline import TurnPipeline
 from core.voice_biometrics import VoiceBiometricMatcher, cosine_similarity
 
@@ -19,7 +21,9 @@ __all__ = [
     "InterruptionClassifier",
     "LexiconManager",
     "NavigationIntentDetector",
+    "SessionSnapshotStore",
     "SessionStateManager",
+    "TurnArbitrator",
     "TurnPipeline",
     "VoiceBiometricMatcher",
     "cosine_similarity",

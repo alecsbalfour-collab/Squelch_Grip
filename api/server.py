@@ -5,11 +5,13 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from core.lexicon_manager import LexiconManager
 from core.prompt_compiler import ContextPromptCompiler
+from core.session_store import SessionSnapshotStore
 from core.state_manager import SessionStateManager
 from core.turn_pipeline import TurnPipeline
 from schemas.lexicon_models import LexiconPack
 from schemas.prompt_models import CompiledContextPacket
 from schemas.session_models import RoomState, VoiceProfile
+from schemas.snapshot_models import RoomSnapshot
 from schemas.turn_models import AudioTurnEvent, TurnProcessingResult
 
 
@@ -35,6 +37,7 @@ def create_app() -> FastAPI:
         state_manager=state_manager, lexicon_manager=lexicon_manager
     )
     prompt_compiler = ContextPromptCompiler()
+    snapshot_store = SessionSnapshotStore()
 
     def _require_room(room_id: str):
         orchestrator = state_manager.get_room(room_id)
@@ -104,6 +107,20 @@ def create_app() -> FastAPI:
             return await turn_pipeline.process_turn(event)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc.args[0]))
+
+    @app.get("/rooms/{room_id}/snapshot", response_model=RoomSnapshot)
+    async def get_snapshot(room_id: str) -> RoomSnapshot:
+        return snapshot_store.export_room(_require_room(room_id))
+
+    @app.post("/rooms/restore", response_model=RoomState)
+    async def restore_room(snapshot: RoomSnapshot) -> RoomState:
+        try:
+            orchestrator = await snapshot_store.restore_room(
+                state_manager, snapshot
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return orchestrator.state
 
     @app.websocket("/ws/rooms/{room_id}")
     async def room_websocket(websocket: WebSocket, room_id: str) -> None:
