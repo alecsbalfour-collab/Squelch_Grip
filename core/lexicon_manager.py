@@ -19,6 +19,9 @@ class LexiconManager:
     def get_pack(self, pack_id: str) -> Optional[LexiconPack]:
         return self._packs.get(pack_id)
 
+    def list_packs(self) -> list[LexiconPack]:
+        return list(self._packs.values())
+
     def attach_pack_to_room(
         self, room_state: RoomState, pack_id: str
     ) -> RoomState:

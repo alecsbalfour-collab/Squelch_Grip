@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from core.default_lexicons import register_default_lexicons
 from core.lexicon_manager import LexiconManager
 from core.prompt_compiler import ContextPromptCompiler
 from core.session_store import SessionSnapshotStore
@@ -24,6 +28,7 @@ class _CreateRoomRequest(BaseModel):
 
     room_id: str = Field(..., min_length=1)
     initial_topic: str = Field(..., min_length=1)
+    lexicon_pack_ids: list[str] = Field(default_factory=list)
 
 
 class _AiSpeakingRequest(BaseModel):
@@ -32,11 +37,48 @@ class _AiSpeakingRequest(BaseModel):
     is_ai_speaking: bool
 
 
-def create_app() -> FastAPI:
+def create_app(
+    api_key: Optional[str] = None,
+    allowed_origins: Optional[list[str]] = None,
+) -> FastAPI:
+    effective_api_key = (
+        api_key if api_key is not None else os.getenv("SQUELCHGRIP_API_KEY")
+    )
+    origins = (
+        allowed_origins
+        if allowed_origins is not None
+        else [
+            o.strip()
+            for o in os.getenv("SQUELCHGRIP_ALLOWED_ORIGINS", "*").split(",")
+            if o.strip()
+        ]
+    )
+
     app = FastAPI(title="SquelchGrip Backend")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    @app.middleware("http")
+    async def api_key_guard(request, call_next):
+        if (
+            effective_api_key
+            and request.method != "OPTIONS"
+            and request.url.path != "/health"
+            and request.headers.get("x-api-key") != effective_api_key
+        ):
+            return JSONResponse(
+                {"detail": "Invalid or missing API key."}, status_code=401
+            )
+        return await call_next(request)
 
     state_manager = SessionStateManager()
     lexicon_manager = LexiconManager()
+    register_default_lexicons(lexicon_manager)
     turn_pipeline = TurnPipeline(
         state_manager=state_manager, lexicon_manager=lexicon_manager
     )
@@ -70,9 +112,17 @@ def create_app() -> FastAPI:
 
     @app.post("/rooms", response_model=RoomState)
     async def create_room(payload: _CreateRoomRequest) -> RoomState:
+        for pack_id in payload.lexicon_pack_ids:
+            if lexicon_manager.get_pack(pack_id) is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"LexiconPack '{pack_id}' not found.",
+                )
         orchestrator = await state_manager.create_room(
             payload.room_id, payload.initial_topic
         )
+        for pack_id in payload.lexicon_pack_ids:
+            lexicon_manager.attach_pack_to_room(orchestrator.state, pack_id)
         return orchestrator.state
 
     @app.get("/rooms/{room_id}", response_model=RoomState)
@@ -121,6 +171,10 @@ def create_app() -> FastAPI:
     @app.post("/profiles", response_model=VoiceProfile)
     async def register_profile(profile: VoiceProfile) -> VoiceProfile:
         return await state_manager.register_voice_profile(profile)
+
+    @app.get("/lexicons", response_model=list[LexiconPack])
+    async def list_lexicons() -> list[LexiconPack]:
+        return lexicon_manager.list_packs()
 
     @app.post("/lexicons", response_model=LexiconPack)
     async def register_lexicon(pack: LexiconPack) -> LexiconPack:
@@ -177,6 +231,13 @@ def create_app() -> FastAPI:
 
     @app.websocket("/ws/rooms/{room_id}")
     async def room_websocket(websocket: WebSocket, room_id: str) -> None:
+        if effective_api_key:
+            provided_key = websocket.headers.get(
+                "x-api-key"
+            ) or websocket.query_params.get("api_key")
+            if provided_key != effective_api_key:
+                await websocket.close(code=1008)
+                return
         if state_manager.get_room(room_id) is None:
             await websocket.close(code=1008)
             return

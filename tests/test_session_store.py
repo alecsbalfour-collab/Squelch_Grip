@@ -109,3 +109,42 @@ def test_rest_restore_corrupted_snapshot_returns_400() -> None:
 
     response = client.post("/rooms/restore", json=body)
     assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_save_and_load_from_disk_round_trip(tmp_path) -> None:
+    source = SessionStateManager()
+    room = await source.create_room("room-disk-01", "Disk Topic")
+    await room.branch_tangent("Disk Tangent", "usr-a")
+    await room.record_utterance("usr-a", "persist me")
+
+    store = SessionSnapshotStore()
+    file_path = store.save_to_disk(room, tmp_path)
+
+    assert file_path.name == "room-disk-01.snapshot.json"
+    assert file_path.exists()
+    RoomSnapshot.model_validate_json(file_path.read_text(encoding="utf-8"))
+
+    target = SessionStateManager()
+    restored = await store.load_from_disk(target, file_path)
+
+    assert target.get_room("room-disk-01") is restored
+    assert restored.current_node.topic_summary == "Disk Tangent"
+    assert restored.current_node.utterances[-1].text == "persist me"
+
+
+@pytest.mark.asyncio
+async def test_load_from_disk_rejects_corrupted_snapshot(tmp_path) -> None:
+    import json
+
+    source = SessionStateManager()
+    room = await source.create_room("room-disk-02", "Root")
+    store = SessionSnapshotStore()
+    file_path = store.save_to_disk(room, tmp_path)
+
+    payload = json.loads(file_path.read_text(encoding="utf-8"))
+    payload["state"]["current_node_id"] = "node-missing"
+    file_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        await store.load_from_disk(SessionStateManager(), file_path)

@@ -1,4 +1,6 @@
+from core.client_sdk import SquelchGripClient
 from core.context_graph import ContextGraphOrchestrator
+from core.default_lexicons import register_default_lexicons
 from core.interruption_classifier import (
     BACKCHANNEL_PHRASES,
     HARD_INTERRUPT_TRIGGERS,
@@ -23,8 +25,10 @@ __all__ = [
     "NavigationIntentDetector",
     "SessionSnapshotStore",
     "SessionStateManager",
+    "SquelchGripClient",
     "TurnArbitrator",
     "TurnPipeline",
     "VoiceBiometricMatcher",
     "cosine_similarity",
+    "register_default_lexicons",
 ]

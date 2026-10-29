@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from core.context_graph import ContextGraphOrchestrator
 from core.state_manager import SessionStateManager
 from schemas.snapshot_models import RoomSnapshot
@@ -59,3 +61,23 @@ class SessionSnapshotStore:
         }
         await state_manager.set_room(snapshot.state.room_id, orchestrator)
         return orchestrator
+
+    def save_to_disk(
+        self, orchestrator: ContextGraphOrchestrator, directory: str | Path
+    ) -> Path:
+        snapshot = self.export_room(orchestrator)
+        target_dir = Path(directory)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        file_path = (
+            target_dir / f"{orchestrator.state.room_id}.snapshot.json"
+        )
+        file_path.write_text(snapshot.model_dump_json(indent=2), encoding="utf-8")
+        return file_path
+
+    async def load_from_disk(
+        self, state_manager: SessionStateManager, file_path: str | Path
+    ) -> ContextGraphOrchestrator:
+        snapshot = RoomSnapshot.model_validate_json(
+            Path(file_path).read_text(encoding="utf-8")
+        )
+        return await self.restore_room(state_manager, snapshot)
