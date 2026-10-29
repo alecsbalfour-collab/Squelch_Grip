@@ -33,6 +33,20 @@ class SessionSnapshotStore:
                 f"Snapshot current_node_id '{snapshot.state.current_node_id}' "
                 "is missing from nodes."
             )
+        for key, node in snapshot.nodes.items():
+            if key != node.node_id:
+                raise ValueError(
+                    f"Snapshot node key '{key}' does not match node_id '{node.node_id}'."
+                )
+            if node.parent_id is not None and node.parent_id not in snapshot.nodes:
+                raise ValueError(
+                    f"Node '{key}' references missing parent_id '{node.parent_id}'."
+                )
+            for child_id in node.child_nodes:
+                if child_id not in snapshot.nodes:
+                    raise ValueError(
+                        f"Node '{key}' references missing child_id '{child_id}'."
+                    )
 
         orchestrator = ContextGraphOrchestrator(
             room_id=snapshot.state.room_id,

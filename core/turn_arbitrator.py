@@ -63,7 +63,8 @@ class TurnArbitrator:
                 1
                 if frame.speaker_id == current_floor_speaker_id
                 and last_turn_timestamp is not None
-                and (frame.timestamp - last_turn_timestamp)
+                and 0.0
+                <= (frame.timestamp - last_turn_timestamp)
                 <= self.floor_hold_window_sec
                 else 0
             )
